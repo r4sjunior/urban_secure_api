@@ -21,6 +21,12 @@ struct Resposta {
     status: String,
 }
 
+// 🔥 ROTA HOME (para testar no navegador)
+async fn home() -> impl Responder {
+    HttpResponse::Ok().body("🚀 Urban Secure API ONLINE")
+}
+
+// 🔥 ROTA PRINCIPAL
 async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
     if let Err(e) = dados.validate() {
         return HttpResponse::BadRequest().json(format!("Erro: {}", e));
@@ -42,6 +48,7 @@ async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
     })
 }
 
+// 🔥 GERA METADATA
 fn gerar_metadata(nome: &str, descricao: &str, lat: f64, long: f64) -> String {
     serde_json::json!({
         "name": nome,
@@ -57,7 +64,7 @@ fn gerar_metadata(nome: &str, descricao: &str, lat: f64, long: f64) -> String {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // 🔥 pega porta do render
+    // 🔥 pega porta do Render
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "10000".to_string())
         .parse()
@@ -66,16 +73,17 @@ async fn main() -> std::io::Result<()> {
     println!("🔥 SERVER STARTED on 0.0.0.0:{}", port);
 
     HttpServer::new(|| {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header();
+
         App::new()
-            .wrap(
-                Cors::default()
-                    .allow_any_origin()
-                    .allow_any_method()
-                    .allow_any_header(),
-            )
-            .route("/registrar", web::post().to(registrar))
+            .wrap(cors)
+            .route("/", web::get().to(home)) // 👈 TESTE NO NAVEGADOR
+            .route("/registrar", web::post().to(registrar)) // 👈 API
     })
-    .bind(("0.0.0.0", port)) // 🔥 ESSENCIAL
+    .bind(("0.0.0.0", port)) // 🔥 ESSENCIAL PRO RENDER
     .expect("Erro ao bindar porta")
     .run()
     .await
