@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Mapa Arte Urbana</title>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+</head>
+
+<body>
+  <h2>Mapa de Arte Urbana</h2>
+  <div id="map" style="height: 500px;"></div>
+
+  <script>
+    const map = L.map('map').setView([-5.79, -35.21], 13);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: 'Mapa'
+    }).addTo(map);
+
+    fetch("http://127.0.0.1:8080/listar")
+      .then(res => res.text())
+      .then(data => {
+        const linhas = data.trim().split("\n");
+
+        linhas.forEach(linha => {
+          if (!linha) return;
+
+          const obj = JSON.parse(linha);
+
+          const lat = obj.location.latitude;
+          const lng = obj.location.longitude;
+
+          L.marker([lat, lng])
+            .addTo(map)
+            .bindPopup(`<b>${obj.name}</b><br>${obj.description}`);
+        });
+      });
+  </script>
+</body>
+</html>

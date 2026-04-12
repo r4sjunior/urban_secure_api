@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Arte Urbana</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<style>
+body { font-family: Arial; }
+#map { height: 400px; margin-top: 10px; }
+
+.popup {
+  width: 160px;
+}
+
+.popup img {
+  width: 100%;
+  border-radius: 8px;
+  margin-top: 5px;
+}
+</style>
+</head>
+
+<body>
+
+<h2>Registrar Arte Urbana</h2>
+
+<input id="nome" placeholder="Nome"><br><br>
+<input id="autor" placeholder="Autor"><br><br>
+<textarea id="descricao" placeholder="Descrição"></textarea><br><br>
+
+<input type="file" id="imagem"><br><br>
+
+<button onclick="enviar()">Enviar</button>
+
+<div id="map"></div>
+
+<script>
+let lat = 0;
+let lng = 0;
+
+// 📍 GPS automático
+navigator.geolocation.getCurrentPosition(pos => {
+    lat = pos.coords.latitude;
+    lng = pos.coords.longitude;
+    map.setView([lat, lng], 15);
+});
+
+// 🗺️ mapa
+const map = L.map('map').setView([-5.79, -35.21], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+// 📸 converter imagem
+function toBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+    });
+}
+
+// 🚀 enviar
+async function enviar() {
+    const file = document.getElementById("imagem").files[0];
+    const base64 = await toBase64(file);
+
+    const data = {
+        nome: document.getElementById("nome").value,
+        autor: document.getElementById("autor").value,
+        descricao: document.getElementById("descricao").value,
+        imagem: base64,
+        latitude: lat,
+        longitude: lng
+    };
+
+    await fetch("http://127.0.0.1:8080/registrar", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(data)
+    });
+
+    carregar();
+}
+
+// 🔥 carregar no mapa
+function carregar() {
+    fetch("http://127.0.0.1:8080/listar")
+    .then(res => res.text())
+    .then(data => {
+        const linhas = data.trim().split("\n");
+
+        linhas.forEach(linha => {
+            if (!linha) return;
+
+            const obj = JSON.parse(linha);
+
+            L.marker([obj.location.latitude, obj.location.longitude])
+            .addTo(map)
+            .bindPopup(`
+                <div class="popup">
+                    <b>${obj.name}</b><br>
+                    ${obj.description}<br>
+                    <img src="${obj.image}" />
+                </div>
+            `);
+        });
+    });
+}
+
+carregar();
+</script>
+
+</body>
+</html>
