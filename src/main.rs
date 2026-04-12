@@ -3,22 +3,15 @@ use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 use log::info;
-
-use std::fs::{OpenOptions, read_to_string};
-use std::io::Write;
+use std::env;
 
 #[derive(Debug, Deserialize, Validate)]
 struct Entrada {
     #[validate(length(min = 3, max = 100))]
     nome: String,
 
-    #[validate(length(min = 3, max = 100))]
-    autor: String,
-
     #[validate(length(min = 5, max = 500))]
     descricao: String,
-
-    imagem: String,
 
     latitude: f64,
     longitude: f64,
@@ -29,7 +22,6 @@ struct Resposta {
     status: String,
 }
 
-// 🔥 REGISTRAR
 async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
     if let Err(e) = dados.validate() {
         return HttpResponse::BadRequest().json(format!("Erro: {}", e));
@@ -43,48 +35,25 @@ async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
 
     let metadata = gerar_metadata(
         &dados.nome,
-        &dados.autor,
         &dados.descricao,
-        &dados.imagem,
         dados.latitude,
         dados.longitude,
     );
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("dados.json")
-        .expect("Erro ao abrir arquivo");
-
-    writeln!(file, "{}", metadata).expect("Erro ao escrever");
-
-    HttpResponse::Ok().json(Resposta { status: metadata })
+    HttpResponse::Ok().json(Resposta {
+        status: metadata,
+    })
 }
 
-// 🔥 LISTAR
-async fn listar() -> impl Responder {
-    let conteudo = read_to_string("dados.json").unwrap_or("".to_string());
-    HttpResponse::Ok().body(conteudo)
-}
-
-// 🔥 GERAR METADATA
-fn gerar_metadata(
-    nome: &str,
-    autor: &str,
-    descricao: &str,
-    imagem: &str,
-    lat: f64,
-    long: f64,
-) -> String {
+fn gerar_metadata(nome: &str, descricao: &str, lat: f64, long: f64) -> String {
     serde_json::json!({
         "name": nome,
-        "author": autor,
         "description": descricao,
-        "image": imagem,
         "location": {
             "latitude": lat,
             "longitude": long
-        }
+        },
+        "type": "arte urbana"
     })
     .to_string()
 }
@@ -93,26 +62,26 @@ fn gerar_metadata(
 async fn main() -> std::io::Result<()> {
     env_logger::init();
 
-    // 🔥 PORTA DINÂMICA (Render exige isso)
-    let port = std::env::var("PORT")
+    // 🔥 PEGA PORTA DO RENDER (OBRIGATÓRIO)
+    let port = env::var("PORT")
         .unwrap_or_else(|_| "8080".to_string())
         .parse::<u16>()
-        .expect("Porta inválida");
+        .unwrap();
+
+    println!("🚀 Servidor rodando na porta {}", port);
 
     HttpServer::new(|| {
         let cors = Cors::default()
             .allow_any_origin() // 🔥 libera acesso externo
-            .allowed_methods(vec!["GET", "POST"])
-            .allowed_headers(vec!["Content-Type"]);
+            .allow_any_method()
+            .allow_any_header();
 
         App::new()
             .wrap(cors)
-            .app_data(web::JsonConfig::default().limit(10_000_000))
+            .app_data(web::JsonConfig::default().limit(4096))
             .route("/registrar", web::post().to(registrar))
-            .route("/listar", web::get().to(listar))
     })
-    // 🔥 ESSENCIAL PRA PRODUÇÃO
-    .bind(("0.0.0.0", port))?
+    .bind(("0.0.0.0", port))? // 🔥 MUITO IMPORTANTE
     .run()
     .await
 }
