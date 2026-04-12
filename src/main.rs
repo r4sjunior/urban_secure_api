@@ -2,7 +2,6 @@ use actix_web::{web, App, HttpServer, HttpResponse, Responder};
 use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
-use log::info;
 use std::env;
 
 #[derive(Debug, Deserialize, Validate)]
@@ -31,8 +30,6 @@ async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
         return HttpResponse::BadRequest().json("Coordenadas inválidas");
     }
 
-    info!("Novo registro recebido");
-
     let metadata = gerar_metadata(
         &dados.nome,
         &dados.descricao,
@@ -60,28 +57,26 @@ fn gerar_metadata(nome: &str, descricao: &str, lat: f64, long: f64) -> String {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init();
+    // 🔥 pega porta do render
+    let port: u16 = env::var("PORT")
+        .unwrap_or_else(|_| "10000".to_string())
+        .parse()
+        .expect("PORT inválida");
 
-    // 🔥 PEGA PORTA DO RENDER (OBRIGATÓRIO)
-    let port = env::var("PORT")
-        .unwrap_or_else(|_| "8080".to_string())
-        .parse::<u16>()
-        .unwrap();
-
-    println!("🚀 Servidor rodando na porta {}", port);
+    println!("🔥 SERVER STARTED on 0.0.0.0:{}", port);
 
     HttpServer::new(|| {
-        let cors = Cors::default()
-            .allow_any_origin() // 🔥 libera acesso externo
-            .allow_any_method()
-            .allow_any_header();
-
         App::new()
-            .wrap(cors)
-            .app_data(web::JsonConfig::default().limit(4096))
+            .wrap(
+                Cors::default()
+                    .allow_any_origin()
+                    .allow_any_method()
+                    .allow_any_header(),
+            )
             .route("/registrar", web::post().to(registrar))
     })
-    .bind(("0.0.0.0", port))? // 🔥 MUITO IMPORTANTE
+    .bind(("0.0.0.0", port)) // 🔥 ESSENCIAL
+    .expect("Erro ao bindar porta")
     .run()
     .await
 }
