@@ -18,7 +18,7 @@ struct Entrada {
     #[validate(length(min = 5, max = 500))]
     descricao: String,
 
-    imagem: String, // base64 direto
+    imagem: String,
 
     latitude: f64,
     longitude: f64,
@@ -29,7 +29,7 @@ struct Resposta {
     status: String,
 }
 
-// 🔥 SALVAR
+// 🔥 REGISTRAR
 async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
     if let Err(e) = dados.validate() {
         return HttpResponse::BadRequest().json(format!("Erro: {}", e));
@@ -45,7 +45,7 @@ async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
         &dados.nome,
         &dados.autor,
         &dados.descricao,
-        &dados.imagem, // 👈 base64 direto
+        &dados.imagem,
         dados.latitude,
         dados.longitude,
     );
@@ -67,7 +67,7 @@ async fn listar() -> impl Responder {
     HttpResponse::Ok().body(conteudo)
 }
 
-// 🔥 METADATA
+// 🔥 GERAR METADATA
 fn gerar_metadata(
     nome: &str,
     autor: &str,
@@ -93,9 +93,15 @@ fn gerar_metadata(
 async fn main() -> std::io::Result<()> {
     env_logger::init();
 
+    // 🔥 PORTA DINÂMICA (Render exige isso)
+    let port = std::env::var("PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse::<u16>()
+        .expect("Porta inválida");
+
     HttpServer::new(|| {
         let cors = Cors::default()
-            .allow_any_origin()
+            .allow_any_origin() // 🔥 libera acesso externo
             .allowed_methods(vec!["GET", "POST"])
             .allowed_headers(vec!["Content-Type"]);
 
@@ -105,7 +111,8 @@ async fn main() -> std::io::Result<()> {
             .route("/registrar", web::post().to(registrar))
             .route("/listar", web::get().to(listar))
     })
-    .bind(("127.0.0.1", 8080))?
+    // 🔥 ESSENCIAL PRA PRODUÇÃO
+    .bind(("0.0.0.0", port))?
     .run()
     .await
 }
