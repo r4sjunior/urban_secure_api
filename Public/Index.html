@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Urban Secure Map</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #111;
+      color: white;
+    }
+
+    header {
+      padding: 10px;
+      text-align: center;
+      background: #000;
+      font-weight: bold;
+      font-size: 18px;
+    }
+
+    #map {
+      flex: 1;
+      width: 100%;
+    }
+
+    .form {
+      padding: 10px;
+      background: #1a1a1a;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    input, button {
+      padding: 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+    }
+
+    input {
+      background: #222;
+      color: white;
+    }
+
+    button {
+      background: #00c853;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #00e676;
+    }
+
+    img {
+      max-width: 100%;
+      border-radius: 8px;
+      margin-top: 5px;
+    }
+
+    /* 💻 PC layout */
+    @media(min-width: 768px){
+      body {
+        flex-direction: row;
+      }
+
+      #map {
+        width: 70%;
+        height: 100vh;
+      }
+
+      .form {
+        width: 30%;
+        height: 100vh;
+        overflow-y: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<header>🌍 Urban Secure</header>
+
+<div id="map"></div>
+
+<div class="form">
+  <input id="nome" placeholder="Nome do artista">
+  <input id="descricao" placeholder="Descrição da arte">
+  <input type="file" id="imagem">
+  <button onclick="registrar()">Salvar Arte</button>
+
+  <img id="preview"/>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+let mapa = L.map('map').setView([-5.79, -35.21], 13);
+let marker;
+
+// mapa base
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap'
+}).addTo(mapa);
+
+// GPS automático
+navigator.geolocation.getCurrentPosition(pos => {
+  const lat = pos.coords.latitude;
+  const lng = pos.coords.longitude;
+
+  mapa.setView([lat, lng], 16);
+
+  marker = L.marker([lat, lng]).addTo(mapa)
+    .bindPopup("Você está aqui")
+    .openPopup();
+});
+
+// preview da imagem
+document.getElementById("imagem").addEventListener("change", function(e){
+  const file = e.target.files[0];
+  const reader = new FileReader();
+
+  reader.onload = function(){
+    document.getElementById("preview").src = reader.result;
+  }
+
+  if(file){
+    reader.readAsDataURL(file);
+  }
+});
+
+// registrar
+function registrar(){
+  if(!marker){
+    alert("Aguardando GPS...");
+    return;
+  }
+
+  const latlng = marker.getLatLng();
+
+  const nome = document.getElementById("nome").value;
+  const descricao = document.getElementById("descricao").value;
+  const imagem = document.getElementById("preview").src;
+
+  fetch("/registrar", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      nome,
+      descricao,
+      latitude: latlng.lat,
+      longitude: latlng.lng,
+      imagem
+    })
+  })
+  .then(res => res.json())
+  .then(() => {
+    alert("Salvo com sucesso!");
+
+    L.marker([latlng.lat, latlng.lng])
+      .addTo(mapa)
+      .bindPopup(`
+        <b>${nome}</b><br>
+        ${descricao}<br>
+        <img src="${imagem}" width="150"/>
+      `);
+  });
+}
+</script>
+
+</body>
+</html>

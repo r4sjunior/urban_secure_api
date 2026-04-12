@@ -1,8 +1,11 @@
 use actix_web::{web, App, HttpServer, HttpResponse, Responder};
+use actix_files::Files;
 use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 use std::env;
+use std::fs::{OpenOptions};
+use std::io::Write;
 
 #[derive(Debug, Deserialize, Validate)]
 struct Entrada {
@@ -14,6 +17,8 @@ struct Entrada {
 
     latitude: f64,
     longitude: f64,
+
+    imagem: Option<String>, // 👈 AGORA ACEITA IMAGEM
 }
 
 #[derive(Serialize)]
@@ -21,13 +26,9 @@ struct Resposta {
     status: String,
 }
 
-// 🔥 ROTA HOME (para testar no navegador)
-async fn home() -> impl Responder {
-    HttpResponse::Ok().body("🚀 Urban Secure API ONLINE")
-}
-
-// 🔥 ROTA PRINCIPAL
 async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
+
+    // validação
     if let Err(e) = dados.validate() {
         return HttpResponse::BadRequest().json(format!("Erro: {}", e));
     }
@@ -36,20 +37,31 @@ async fn registrar(dados: web::Json<Entrada>) -> impl Responder {
         return HttpResponse::BadRequest().json("Coordenadas inválidas");
     }
 
+    // gerar metadata
     let metadata = gerar_metadata(
         &dados.nome,
         &dados.descricao,
         dados.latitude,
         dados.longitude,
+        dados.imagem.clone(),
     );
 
+    // salvar no arquivo
+    salvar_dados(&metadata);
+
     HttpResponse::Ok().json(Resposta {
-        status: metadata,
+        status: "Salvo com sucesso".to_string(),
     })
 }
 
-// 🔥 GERA METADATA
-fn gerar_metadata(nome: &str, descricao: &str, lat: f64, long: f64) -> String {
+// 🔥 gera JSON estruturado
+fn gerar_metadata(
+    nome: &str,
+    descricao: &str,
+    lat: f64,
+    long: f64,
+    imagem: Option<String>,
+) -> String {
     serde_json::json!({
         "name": nome,
         "description": descricao,
@@ -57,34 +69,50 @@ fn gerar_metadata(nome: &str, descricao: &str, lat: f64, long: f64) -> String {
             "latitude": lat,
             "longitude": long
         },
+        "image": imagem,
         "type": "arte urbana"
     })
     .to_string()
 }
 
+// 🔥 salva no arquivo local
+fn salvar_dados(dados: &str) {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("dados.json")
+        .expect("Erro ao abrir arquivo");
+
+    writeln!(file, "{}", dados).expect("Erro ao escrever");
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // 🔥 pega porta do Render
+
+    // porta dinâmica (Render)
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "10000".to_string())
         .parse()
-        .expect("PORT inválida");
+        .unwrap();
 
     println!("🔥 SERVER STARTED on 0.0.0.0:{}", port);
 
     HttpServer::new(|| {
-        let cors = Cors::default()
-            .allow_any_origin()
-            .allow_any_method()
-            .allow_any_header();
-
         App::new()
-            .wrap(cors)
-            .route("/", web::get().to(home)) // 👈 TESTE NO NAVEGADOR
-            .route("/registrar", web::post().to(registrar)) // 👈 API
+            .wrap(
+                Cors::default()
+                    .allow_any_origin()
+                    .allow_any_method()
+                    .allow_any_header(),
+            )
+
+            // rota API
+            .route("/registrar", web::post().to(registrar))
+
+            // 🔥 SERVE FRONTEND
+            .service(Files::new("/", "./public").index_file("index.html"))
     })
-    .bind(("0.0.0.0", port)) // 🔥 ESSENCIAL PRO RENDER
-    .expect("Erro ao bindar porta")
+    .bind(("0.0.0.0", port))?
     .run()
     .await
 }
