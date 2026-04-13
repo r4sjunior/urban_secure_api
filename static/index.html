@@ -159,7 +159,7 @@ function registrar(){
   const descricao = document.getElementById("descricao").value;
   const imagem = document.getElementById("preview").src;
 
-  fetch("/registrar", {
+  fetch("https://urban-secure-api.onrender.com/registrar", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
