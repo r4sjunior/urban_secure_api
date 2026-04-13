@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::fs::File;
 use std::io::Write;
 use uuid::Uuid;
-use base64::decode;
+use base64::{engine::general_purpose, Engine as _};
 
 #[derive(Deserialize)]
 struct Arte {
@@ -19,18 +19,16 @@ struct Arte {
 async fn registrar(info: web::Json<Arte>) -> impl Responder {
     let data = &info.imagem;
 
-    // remove prefixo base64
     let base64_data = match data.split(",").nth(1) {
         Some(v) => v,
-        None => {
-            return HttpResponse::BadRequest().body("imagem inválida");
-        }
+        None => return HttpResponse::BadRequest().body("imagem inválida"),
     };
 
-    let bytes = match decode(base64_data) {
+    let bytes = match general_purpose::STANDARD.decode(base64_data) {
         Ok(b) => b,
-        Err(_) => {
-            return HttpResponse::BadRequest().body("erro ao decodificar imagem");
+        Err(e) => {
+            println!("Erro decode: {:?}", e);
+            return HttpResponse::BadRequest().body("erro base64");
         }
     };
 
@@ -46,17 +44,12 @@ async fn registrar(info: web::Json<Arte>) -> impl Responder {
 
     if let Err(e) = file.write_all(&bytes) {
         println!("Erro salvar arquivo: {:?}", e);
-        return HttpResponse::InternalServerError().body("erro salvar arquivo");
+        return HttpResponse::InternalServerError().body("erro salvar");
     }
 
-    println!("Imagem salva em: {}", filename);
+    println!("Imagem salva: {}", filename);
 
     HttpResponse::Ok().json("ok")
-}
-
-// rota pra teste
-async fn index() -> impl Responder {
-    HttpResponse::Ok().body("API rodando 🚀")
 }
 
 #[actix_web::main]
@@ -74,11 +67,14 @@ async fn main() -> std::io::Result<()> {
             .wrap(Cors::permissive())
             .app_data(web::PayloadConfig::new(50 * 1024 * 1024))
 
-            .route("/", web::get().to(index))
+            // API
             .route("/registrar", web::post().to(registrar))
 
-            // opcional: acessar arquivos
-            .service(Files::new("/files", "/tmp").show_files_listing())
+            // FRONTEND
+            .service(
+                Files::new("/", "./static")
+                    .index_file("index.html")
+            )
     })
     .bind(("0.0.0.0", port))?
     .run()
