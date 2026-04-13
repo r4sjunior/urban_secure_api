@@ -3,43 +3,50 @@ use actix_files::Files;
 use actix_multipart::Multipart;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use futures_util::StreamExt as _;
+use std::fs::File;
+use std::io::Write;
+use uuid::Uuid;
 
 async fn upload(mut payload: Multipart) -> impl Responder {
     while let Some(item) = payload.next().await {
         let mut field = item.unwrap();
 
-        // ✅ FIX DO ERRO (sem and_then)
-        let field_name = field
-            .content_disposition()
-            .get_name()
-            .unwrap_or("file");
+        // nome único do arquivo
+        let filename = format!("upload-{}.bin", Uuid::new_v4());
+        let filepath = format!("./uploads/{}", filename);
 
-        println!("📦 Campo recebido: {}", field_name);
+        println!("💾 Salvando em: {}", filepath);
 
+        let mut f = File::create(&filepath).unwrap();
+
+        // salva os chunks
         while let Some(chunk) = field.next().await {
-            let _data = chunk.unwrap();
+            let data = chunk.unwrap();
+            f.write_all(&data).unwrap();
         }
     }
 
-    HttpResponse::Ok().body("Upload concluído 🚀")
+    HttpResponse::Ok().body("Upload salvo com sucesso 🚀")
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let port = 10000;
 
+    // garante pasta uploads
+    std::fs::create_dir_all("./uploads").unwrap();
+
     println!("🔥 Server rodando na porta {}", port);
 
     HttpServer::new(|| {
         App::new()
-            // limite 50MB
             .app_data(web::PayloadConfig::new(50 * 1024 * 1024))
             .wrap(Cors::permissive())
 
-            // rota upload
+            // upload
             .route("/upload", web::post().to(upload))
 
-            // 🔥 SITE (igual antes)
+            // site (igual antes)
             .service(Files::new("/", "./static").index_file("index.html"))
     })
     .bind(("0.0.0.0", port))?
