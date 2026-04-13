@@ -21,15 +21,17 @@ async fn salvar(mut payload: Multipart) -> impl Responder {
     let mut longitude = 0.0;
     let mut imagem_path = String::new();
 
-    // cria pasta uploads se não existir
     fs::create_dir_all("./uploads").unwrap();
 
     while let Some(item) = payload.next().await {
         let mut field = item.unwrap();
 
-        // 🔥 CORREÇÃO AQUI (SEM unwrap)
-        let content = field.content_disposition();
-        let name = content.get_name().unwrap_or("");
+        // 🔥 CORREÇÃO: extrai e clona o nome antes
+        let name = field
+            .content_disposition()
+            .get_name()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
 
         if name == "imagem" {
             let filename = format!("./uploads/{}.jpg", uuid::Uuid::new_v4());
@@ -50,7 +52,7 @@ async fn salvar(mut payload: Multipart) -> impl Responder {
 
             let value = String::from_utf8(data).unwrap();
 
-            match name {
+            match name.as_str() {
                 "titulo" => titulo = value,
                 "descricao" => descricao = value,
                 "latitude" => latitude = value.parse().unwrap_or(0.0),
