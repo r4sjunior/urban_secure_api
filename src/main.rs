@@ -1,83 +1,63 @@
-use actix_web::{post, App, HttpServer, Responder, HttpResponse};
-use actix_multipart::Multipart;
-use futures_util::StreamExt as _;
 use actix_cors::Cors;
+use actix_multipart::Multipart;
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use futures_util::StreamExt as _;
+use std::fs::File;
+use std::io::Write;
+use uuid::Uuid;
 
-#[post("/registrar")]
-async fn registrar(mut payload: Multipart) -> impl Responder {
-    println!("Recebendo upload...");
-
+async fn upload(mut payload: Multipart) -> impl Responder {
     while let Some(item) = payload.next().await {
         let mut field = match item {
             Ok(f) => f,
-            Err(e) => {
-                println!("Erro ao ler campo: {:?}", e);
-                return HttpResponse::BadRequest().body("Erro no upload");
-            }
+            Err(_) => return HttpResponse::BadRequest().body("Erro no upload"),
         };
 
-        // 👇 pega metadata SEM causar conflito de borrow
-        let field_name = field
-            .content_disposition()
-            .and_then(|cd| cd.get_name())
-            .unwrap_or("")
-            .to_string();
+        // 🔒 evita problema de borrow
+        let field_name = {
+            let cd = field.content_disposition();
+            cd.get_name().unwrap_or("").to_string()
+        };
 
-        println!("Campo: {}", field_name);
+        if field_name == "file" {
+            let filename = format!("upload-{}.bin", Uuid::new_v4());
 
-        let mut data = Vec::new();
+            let mut f = match File::create(&filename) {
+                Ok(file) => file,
+                Err(_) => return HttpResponse::InternalServerError().body("Erro ao criar arquivo"),
+            };
 
-        // 👇 leitura do arquivo/dados
-        while let Some(chunk) = field.next().await {
-            match chunk {
-                Ok(bytes) => data.extend_from_slice(&bytes),
-                Err(e) => {
-                    println!("Erro ao ler chunk: {:?}", e);
-                    return HttpResponse::InternalServerError().body("Erro ao processar upload");
+            // leitura segura do stream
+            while let Some(chunk) = field.next().await {
+                let data = match chunk {
+                    Ok(bytes) => bytes,
+                    Err(_) => return HttpResponse::InternalServerError().body("Erro ao ler arquivo"),
+                };
+
+                if f.write_all(&data).is_err() {
+                    return HttpResponse::InternalServerError().body("Erro ao salvar arquivo");
                 }
             }
-        }
 
-        println!("Recebido {} bytes no campo {}", data.len(), field_name);
-
-        // 👇 tratamento dos campos
-        match field_name.as_str() {
-            "file" => {
-                println!("Arquivo recebido ({} bytes)", data.len());
-
-                // exemplo: salvar arquivo (opcional)
-                // std::fs::write("upload.bin", &data).unwrap();
-            }
-            "nome" => {
-                let texto = String::from_utf8_lossy(&data);
-                println!("Nome: {}", texto);
-            }
-            _ => {
-                println!("Campo desconhecido: {}", field_name);
-            }
+            return HttpResponse::Ok().body(format!("Arquivo salvo: {}", filename));
         }
     }
 
-    HttpResponse::Ok().body("Upload recebido com sucesso")
+    HttpResponse::BadRequest().body("Nenhum arquivo enviado")
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("🚀 Servidor rodando na porta 10000");
+    println!("🔥 Server rodando na porta 8080");
 
     HttpServer::new(|| {
         App::new()
-            // 👇 LIMITE DE UPLOAD (resolve 413)
-            .app_data(actix_web::web::PayloadConfig::new(50 * 1024 * 1024)) // 50MB
-
-            // 👇 libera acesso do frontend
+            // 🔥 limite de upload (50MB)
+            .app_data(web::PayloadConfig::new(50 * 1024 * 1024))
             .wrap(Cors::permissive())
-
-            // 👇 rota
-            .service(registrar)
+            .route("/upload", web::post().to(upload))
     })
-    .bind(("0.0.0.0", 10000)) // obrigatório no Render
-    .unwrap()
+    .bind(("0.0.0.0", 8080))?
     .run()
     .await
 }
