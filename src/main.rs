@@ -21,12 +21,15 @@ async fn salvar(mut payload: Multipart) -> impl Responder {
     let mut longitude = 0.0;
     let mut imagem_path = String::new();
 
+    // cria pasta uploads se não existir
     fs::create_dir_all("./uploads").unwrap();
 
     while let Some(item) = payload.next().await {
         let mut field = item.unwrap();
-        let content = field.content_disposition().unwrap();
-        let name = content.get_name().unwrap();
+
+        // 🔥 CORREÇÃO AQUI (SEM unwrap)
+        let content = field.content_disposition();
+        let name = content.get_name().unwrap_or("");
 
         if name == "imagem" {
             let filename = format!("./uploads/{}.jpg", uuid::Uuid::new_v4());
@@ -40,6 +43,7 @@ async fn salvar(mut payload: Multipart) -> impl Responder {
             imagem_path = filename;
         } else {
             let mut data = Vec::new();
+
             while let Some(chunk) = field.next().await {
                 data.extend_from_slice(&chunk.unwrap());
             }
@@ -84,7 +88,7 @@ async fn listar() -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("🔥 SERVER STARTED");
+    println!("🔥 SERVER STARTED on 0.0.0.0:10000");
 
     HttpServer::new(|| {
         App::new()
