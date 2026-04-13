@@ -1,55 +1,84 @@
 use actix_web::{web, App, HttpServer, HttpResponse, Responder};
-use actix_multipart::Multipart;
 use actix_files::Files;
-use futures_util::StreamExt;
+use actix_cors::Cors;
+use serde::Deserialize;
+use std::fs::File;
 use std::io::Write;
 use uuid::Uuid;
-use actix_cors::Cors;
+use base64::decode;
 
-async fn registrar(mut payload: Multipart) -> impl Responder {
-    while let Some(item) = payload.next().await {
-        let mut field = item.unwrap();
-
-        let filename = format!("{}.bin", Uuid::new_v4());
-        let filepath = format!("./uploads/{}", filename);
-
-        let mut f = std::fs::File::create(filepath).unwrap();
-
-        while let Some(chunk) = field.next().await {
-            let data = chunk.unwrap();
-            f.write_all(&data).unwrap();
-        }
-    }
-
-    HttpResponse::Ok().json("Upload realizado com sucesso")
+#[derive(Deserialize)]
+struct Arte {
+    nome: String,
+    descricao: String,
+    latitude: f64,
+    longitude: f64,
+    imagem: String,
 }
 
-async fn index() -> impl Responder {
-    let html = std::fs::read_to_string("./static/index.html")
-        .unwrap_or("Erro ao carregar HTML".to_string());
+async fn registrar(info: web::Json<Arte>) -> impl Responder {
+    let data = &info.imagem;
 
-    HttpResponse::Ok()
-        .content_type("text/html")
-        .body(html)
+    // remove prefixo base64
+    let base64_data = match data.split(",").nth(1) {
+        Some(v) => v,
+        None => {
+            return HttpResponse::BadRequest().body("imagem inválida");
+        }
+    };
+
+    let bytes = match decode(base64_data) {
+        Ok(b) => b,
+        Err(_) => {
+            return HttpResponse::BadRequest().body("erro ao decodificar imagem");
+        }
+    };
+
+    let filename = format!("/tmp/{}.png", Uuid::new_v4());
+
+    let mut file = match File::create(&filename) {
+        Ok(f) => f,
+        Err(e) => {
+            println!("Erro criar arquivo: {:?}", e);
+            return HttpResponse::InternalServerError().body("erro criar arquivo");
+        }
+    };
+
+    if let Err(e) = file.write_all(&bytes) {
+        println!("Erro salvar arquivo: {:?}", e);
+        return HttpResponse::InternalServerError().body("erro salvar arquivo");
+    }
+
+    println!("Imagem salva em: {}", filename);
+
+    HttpResponse::Ok().json("ok")
+}
+
+// rota pra teste
+async fn index() -> impl Responder {
+    HttpResponse::Ok().body("API rodando 🚀")
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    std::fs::create_dir_all("./uploads").ok();
 
-    let port = 10000;
+    let port = std::env::var("PORT")
+        .unwrap_or("10000".to_string())
+        .parse::<u16>()
+        .unwrap();
 
     println!("🔥 Server rodando na porta {}", port);
 
     HttpServer::new(|| {
-        let cors = Cors::permissive();
-
         App::new()
-            .wrap(cors)
+            .wrap(Cors::permissive())
             .app_data(web::PayloadConfig::new(50 * 1024 * 1024))
+
             .route("/", web::get().to(index))
             .route("/registrar", web::post().to(registrar))
-            .service(Files::new("/uploads", "./uploads").show_files_listing())
+
+            // opcional: acessar arquivos
+            .service(Files::new("/files", "/tmp").show_files_listing())
     })
     .bind(("0.0.0.0", port))?
     .run()
