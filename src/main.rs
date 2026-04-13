@@ -1,142 +1,97 @@
 use actix_web::{web, App, HttpServer, HttpResponse, Responder};
-use actix_files::Files;
-use actix_cors::Cors;
-use serde::Deserialize;
-use std::fs::{File, read_to_string};
+use actix_multipart::Multipart;
+use futures_util::StreamExt;
+use std::fs;
 use std::io::Write;
-use uuid::Uuid;
-use base64::{engine::general_purpose, Engine as _};
-use serde_json;
+use serde::{Serialize, Deserialize};
 
-const DB_PATH: &str = "./data/db.json";
-const IMG_DIR: &str = "./data/images";
-
-#[derive(Deserialize)]
-struct Arte {
-    nome: String,
+#[derive(Serialize, Deserialize)]
+struct Registro {
+    titulo: String,
     descricao: String,
+    imagem: String,
     latitude: f64,
     longitude: f64,
-    imagem: String,
 }
 
-// SALVAR
-async fn registrar(info: web::Json<Arte>) -> impl Responder {
-    let id = Uuid::new_v4();
-    let img_filename = format!("{}.png", id);
-    let img_path = format!("{}/{}", IMG_DIR, img_filename);
-    let img_url = format!("/files/{}", img_filename); // URL pública
+async fn salvar(mut payload: Multipart) -> impl Responder {
+    let mut titulo = String::new();
+    let mut descricao = String::new();
+    let mut latitude = 0.0;
+    let mut longitude = 0.0;
+    let mut imagem_path = String::new();
 
-    let base64_data = match info.imagem.split(",").nth(1) {
-        Some(v) => v,
-        None => return HttpResponse::BadRequest().body("imagem inválida"),
+    fs::create_dir_all("./uploads").unwrap();
+
+    while let Some(item) = payload.next().await {
+        let mut field = item.unwrap();
+        let content = field.content_disposition().unwrap();
+        let name = content.get_name().unwrap();
+
+        if name == "imagem" {
+            let filename = format!("./uploads/{}.jpg", uuid::Uuid::new_v4());
+            let mut f = fs::File::create(&filename).unwrap();
+
+            while let Some(chunk) = field.next().await {
+                let data = chunk.unwrap();
+                f.write_all(&data).unwrap();
+            }
+
+            imagem_path = filename;
+        } else {
+            let mut data = Vec::new();
+            while let Some(chunk) = field.next().await {
+                data.extend_from_slice(&chunk.unwrap());
+            }
+
+            let value = String::from_utf8(data).unwrap();
+
+            match name {
+                "titulo" => titulo = value,
+                "descricao" => descricao = value,
+                "latitude" => latitude = value.parse().unwrap_or(0.0),
+                "longitude" => longitude = value.parse().unwrap_or(0.0),
+                _ => {}
+            }
+        }
+    }
+
+    let novo = Registro {
+        titulo,
+        descricao,
+        imagem: imagem_path,
+        latitude,
+        longitude,
     };
 
-    let bytes = match general_purpose::STANDARD.decode(base64_data) {
-        Ok(b) => b,
-        Err(_) => return HttpResponse::BadRequest().body("erro base64"),
+    let mut dados: Vec<Registro> = if let Ok(file) = fs::read_to_string("dados.json") {
+        serde_json::from_str(&file).unwrap_or(vec![])
+    } else {
+        vec![]
     };
 
-    // Garantir que o diretório de imagens existe
-    if let Err(e) = std::fs::create_dir_all(IMG_DIR) {
-        return HttpResponse::InternalServerError()
-            .body(format!("erro ao criar diretório de imagens: {}", e));
-    }
+    dados.push(novo);
 
-    // Salvar imagem
-    let mut file = match File::create(&img_path) {
-        Ok(f) => f,
-        Err(e) => return HttpResponse::InternalServerError()
-            .body(format!("erro ao criar arquivo de imagem: {}", e)),
-    };
+    fs::write("dados.json", serde_json::to_string_pretty(&dados).unwrap()).unwrap();
 
-    if let Err(e) = file.write_all(&bytes) {
-        return HttpResponse::InternalServerError()
-            .body(format!("erro ao salvar imagem: {}", e));
-    }
-
-    // Criar registro com a URL pública da imagem
-    let registro = serde_json::json!({
-        "nome": info.nome,
-        "descricao": info.descricao,
-        "latitude": info.latitude,
-        "longitude": info.longitude,
-        "imagem": img_url
-    });
-
-    // Ler banco existente
-    let mut registros: Vec<serde_json::Value> = Vec::new();
-    if let Ok(conteudo) = read_to_string(DB_PATH) {
-        registros = serde_json::from_str(&conteudo).unwrap_or_default();
-    }
-
-    registros.push(registro);
-
-    // Garantir que o diretório de dados existe
-    if let Err(e) = std::fs::create_dir_all("./data") {
-        return HttpResponse::InternalServerError()
-            .body(format!("erro ao criar diretório de dados: {}", e));
-    }
-
-    // Salvar banco atualizado
-    let mut db = match File::create(DB_PATH) {
-        Ok(f) => f,
-        Err(e) => return HttpResponse::InternalServerError()
-            .body(format!("erro ao abrir db.json: {}", e)),
-    };
-
-    if let Err(e) = db.write_all(serde_json::to_string(&registros).unwrap().as_bytes()) {
-        return HttpResponse::InternalServerError()
-            .body(format!("erro ao salvar db.json: {}", e));
-    }
-
-    HttpResponse::Ok().json("ok")
+    HttpResponse::Ok().body("Salvo com sucesso")
 }
 
-// LISTAR
 async fn listar() -> impl Responder {
-    match read_to_string(DB_PATH) {
-        Ok(data) => HttpResponse::Ok()
-            .content_type("application/json")
-            .body(data),
-        Err(_) => HttpResponse::Ok()
-            .content_type("application/json")
-            .body("[]"),
-    }
+    let dados = fs::read_to_string("dados.json").unwrap_or("[]".to_string());
+    HttpResponse::Ok().body(dados)
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Garantir que os diretórios existem ao iniciar
-    std::fs::create_dir_all(IMG_DIR)?;
-    std::fs::create_dir_all("./data")?;
-
-    let port = std::env::var("PORT")
-        .unwrap_or("10000".to_string())
-        .parse::<u16>()
-        .unwrap();
-
-    println!("🔥 Server rodando na porta {}", port);
+    println!("🔥 SERVER STARTED");
 
     HttpServer::new(|| {
         App::new()
-            .wrap(Cors::permissive())
-            .app_data(web::PayloadConfig::new(50 * 1024 * 1024))
-
-            // ROTAS API
-            .route("/registrar", web::post().to(registrar))
-            .route("/listar", web::get().to(listar))
-
-            // SERVIR IMAGENS — aponta para ./data/images
-            .service(Files::new("/files", IMG_DIR))
-
-            // FRONTEND
-            .service(
-                Files::new("/", "./static")
-                    .index_file("index.html")
-            )
+            .route("/salvar", web::post().to(salvar))
+            .route("/dados", web::get().to(listar))
     })
-    .bind(("0.0.0.0", port))?
+    .bind("0.0.0.0:10000")?
     .run()
     .await
 }
