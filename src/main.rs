@@ -8,6 +8,9 @@ use uuid::Uuid;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json;
 
+const DB_PATH: &str = "./data/db.json";
+const IMG_DIR: &str = "./data/images";
+
 #[derive(Deserialize)]
 struct Arte {
     nome: String,
@@ -19,6 +22,10 @@ struct Arte {
 
 // SALVAR
 async fn registrar(info: web::Json<Arte>) -> impl Responder {
+    let id = Uuid::new_v4();
+    let img_filename = format!("{}.png", id);
+    let img_path = format!("{}/{}", IMG_DIR, img_filename);
+    let img_url = format!("/files/{}", img_filename); // URL pública
 
     let base64_data = match info.imagem.split(",").nth(1) {
         Some(v) => v,
@@ -30,49 +37,79 @@ async fn registrar(info: web::Json<Arte>) -> impl Responder {
         Err(_) => return HttpResponse::BadRequest().body("erro base64"),
     };
 
-    let filename = format!("/tmp/{}.png", Uuid::new_v4());
+    // Garantir que o diretório de imagens existe
+    if let Err(e) = std::fs::create_dir_all(IMG_DIR) {
+        return HttpResponse::InternalServerError()
+            .body(format!("erro ao criar diretório de imagens: {}", e));
+    }
 
-    let mut file = File::create(&filename).unwrap();
-    file.write_all(&bytes).unwrap();
+    // Salvar imagem
+    let mut file = match File::create(&img_path) {
+        Ok(f) => f,
+        Err(e) => return HttpResponse::InternalServerError()
+            .body(format!("erro ao criar arquivo de imagem: {}", e)),
+    };
 
-    // criar registro
+    if let Err(e) = file.write_all(&bytes) {
+        return HttpResponse::InternalServerError()
+            .body(format!("erro ao salvar imagem: {}", e));
+    }
+
+    // Criar registro com a URL pública da imagem
     let registro = serde_json::json!({
         "nome": info.nome,
         "descricao": info.descricao,
         "latitude": info.latitude,
         "longitude": info.longitude,
-        "imagem": filename
+        "imagem": img_url
     });
 
-    // ler banco
-    let mut registros = Vec::new();
-
-    if let Ok(conteudo) = read_to_string("/tmp/db.json") {
-        registros = serde_json::from_str(&conteudo).unwrap_or(Vec::new());
+    // Ler banco existente
+    let mut registros: Vec<serde_json::Value> = Vec::new();
+    if let Ok(conteudo) = read_to_string(DB_PATH) {
+        registros = serde_json::from_str(&conteudo).unwrap_or_default();
     }
 
     registros.push(registro);
 
-    let mut db = File::create("/tmp/db.json").unwrap();
-    db.write_all(
-        serde_json::to_string(&registros).unwrap().as_bytes()
-    ).unwrap();
+    // Garantir que o diretório de dados existe
+    if let Err(e) = std::fs::create_dir_all("./data") {
+        return HttpResponse::InternalServerError()
+            .body(format!("erro ao criar diretório de dados: {}", e));
+    }
+
+    // Salvar banco atualizado
+    let mut db = match File::create(DB_PATH) {
+        Ok(f) => f,
+        Err(e) => return HttpResponse::InternalServerError()
+            .body(format!("erro ao abrir db.json: {}", e)),
+    };
+
+    if let Err(e) = db.write_all(serde_json::to_string(&registros).unwrap().as_bytes()) {
+        return HttpResponse::InternalServerError()
+            .body(format!("erro ao salvar db.json: {}", e));
+    }
 
     HttpResponse::Ok().json("ok")
 }
 
 // LISTAR
 async fn listar() -> impl Responder {
-    match read_to_string("/tmp/db.json") {
+    match read_to_string(DB_PATH) {
         Ok(data) => HttpResponse::Ok()
             .content_type("application/json")
             .body(data),
-        Err(_) => HttpResponse::Ok().body("[]"),
+        Err(_) => HttpResponse::Ok()
+            .content_type("application/json")
+            .body("[]"),
     }
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Garantir que os diretórios existem ao iniciar
+    std::fs::create_dir_all(IMG_DIR)?;
+    std::fs::create_dir_all("./data")?;
 
     let port = std::env::var("PORT")
         .unwrap_or("10000".to_string())
@@ -90,8 +127,8 @@ async fn main() -> std::io::Result<()> {
             .route("/registrar", web::post().to(registrar))
             .route("/listar", web::get().to(listar))
 
-            // SERVIR IMAGENS
-            .service(Files::new("/files", "/tmp").show_files_listing())
+            // SERVIR IMAGENS — aponta para ./data/images
+            .service(Files::new("/files", IMG_DIR))
 
             // FRONTEND
             .service(
