@@ -1,107 +1,83 @@
-use actix_web::{web, App, HttpServer, HttpResponse, Responder};
-use actix_cors::Cors;
-use actix_files::Files;
+use actix_web::{post, App, HttpServer, Responder, HttpResponse};
 use actix_multipart::Multipart;
 use futures_util::StreamExt as _;
-use std::io::Write;
-use uuid::Uuid;
+use actix_cors::Cors;
 
-// =======================
-// 📌 ROTA DE UPLOAD
-// =======================
-async fn salvar(mut payload: Multipart) -> impl Responder {
-    let mut nome = String::new();
-    let mut descricao = String::new();
-    let mut latitude = String::new();
-    let mut longitude = String::new();
-    let mut imagem_path = String::new();
+#[post("/registrar")]
+async fn registrar(mut payload: Multipart) -> impl Responder {
+    println!("Recebendo upload...");
 
     while let Some(item) = payload.next().await {
-        let mut field = item.unwrap();
-
-        let content_disposition = field.content_disposition();
-
-        let field_name = content_disposition
-            .get_name()
-            .unwrap_or("");
-
-        // =======================
-        // 📸 UPLOAD IMAGEM
-        // =======================
-        if field_name == "imagem" {
-            let filename = format!("{}.jpg", Uuid::new_v4());
-            let filepath = format!("./uploads/{}", filename);
-
-            let mut f = std::fs::File::create(&filepath).unwrap();
-
-            while let Some(chunk) = field.next().await {
-                let data = chunk.unwrap();
-                f.write_all(&data).unwrap();
+        let mut field = match item {
+            Ok(f) => f,
+            Err(e) => {
+                println!("Erro ao ler campo: {:?}", e);
+                return HttpResponse::BadRequest().body("Erro no upload");
             }
+        };
 
-            imagem_path = filepath;
-        } 
-        // =======================
-        // 📝 CAMPOS TEXTO
-        // =======================
-        else {
-            let mut bytes = Vec::new();
+        // 👇 pega metadata SEM causar conflito de borrow
+        let field_name = field
+            .content_disposition()
+            .and_then(|cd| cd.get_name())
+            .unwrap_or("")
+            .to_string();
 
-            while let Some(chunk) = field.next().await {
-                bytes.extend_from_slice(&chunk.unwrap());
+        println!("Campo: {}", field_name);
+
+        let mut data = Vec::new();
+
+        // 👇 leitura do arquivo/dados
+        while let Some(chunk) = field.next().await {
+            match chunk {
+                Ok(bytes) => data.extend_from_slice(&bytes),
+                Err(e) => {
+                    println!("Erro ao ler chunk: {:?}", e);
+                    return HttpResponse::InternalServerError().body("Erro ao processar upload");
+                }
             }
+        }
 
-            let text = String::from_utf8(bytes).unwrap_or_default();
+        println!("Recebido {} bytes no campo {}", data.len(), field_name);
 
-            match field_name {
-                "nome" => nome = text,
-                "descricao" => descricao = text,
-                "latitude" => latitude = text,
-                "longitude" => longitude = text,
-                _ => {}
+        // 👇 tratamento dos campos
+        match field_name.as_str() {
+            "file" => {
+                println!("Arquivo recebido ({} bytes)", data.len());
+
+                // exemplo: salvar arquivo (opcional)
+                // std::fs::write("upload.bin", &data).unwrap();
+            }
+            "nome" => {
+                let texto = String::from_utf8_lossy(&data);
+                println!("Nome: {}", texto);
+            }
+            _ => {
+                println!("Campo desconhecido: {}", field_name);
             }
         }
     }
 
-    println!("📍 NOVO REGISTRO");
-    println!("Nome: {}", nome);
-    println!("Descrição: {}", descricao);
-    println!("Lat: {}", latitude);
-    println!("Lng: {}", longitude);
-    println!("Imagem: {}", imagem_path);
-
-    HttpResponse::Ok().body("Salvo com sucesso 🚀")
+    HttpResponse::Ok().body("Upload recebido com sucesso")
 }
 
-// =======================
-// 🚀 MAIN
-// =======================
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-
-    // cria pasta uploads automaticamente
-    std::fs::create_dir_all("./uploads").unwrap();
-
-    println!("🔥 SERVER STARTED on 0.0.0.0:10000");
+    println!("🚀 Servidor rodando na porta 10000");
 
     HttpServer::new(|| {
         App::new()
-            // 🔥 AUMENTA LIMITE DE UPLOAD (resolve erro 413)
-            .app_data(web::PayloadConfig::new(50 * 1024 * 1024))
+            // 👇 LIMITE DE UPLOAD (resolve 413)
+            .app_data(actix_web::web::PayloadConfig::new(50 * 1024 * 1024)) // 50MB
 
-            // 🌐 libera CORS
+            // 👇 libera acesso do frontend
             .wrap(Cors::permissive())
 
-            // 📡 API
-            .route("/registrar", web::post().to(salvar))
-
-            // 🌍 FRONTEND
-            .service(
-                Files::new("/", "./static")
-                    .index_file("index.html")
-            )
+            // 👇 rota
+            .service(registrar)
     })
-    .bind(("0.0.0.0", 10000))?
+    .bind(("0.0.0.0", 10000)) // obrigatório no Render
+    .unwrap()
     .run()
     .await
 }
